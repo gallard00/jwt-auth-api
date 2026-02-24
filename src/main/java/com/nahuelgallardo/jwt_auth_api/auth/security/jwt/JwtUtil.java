@@ -1,0 +1,64 @@
+package com.nahuelgallardo.jwt_auth_api.auth.security.jwt;
+
+import lombok.Value;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.stereotype.Component;
+
+import java.security.Key;
+import java.util.Date;
+import java.util.Map;
+
+@Component
+public class JwtUtil {
+
+    private final Key key;
+    private final long jwtExpirationMs;
+
+    public JwtUtil(@Value("${jwt.secret}") String secret,
+                   @Value("${jwt.expiration-ms}") long jwtExpirationMs) {
+        this.key = Keys.hmacShaKeyFor(secret.getBytes());
+        this.jwtExpirationMs = jwtExpirationMs;
+    }
+
+    public String generateToken (Map<String, Object> extraClaims, UserDetails userDetails) {
+        Date now = new Date();
+        Date exp = new Date(now.getTime() + jwtExpirationMs);
+
+        // Agrego los roles al JWT automaticamente
+        extraClaims.put("authorities",
+                userDetails.getAuthorities()
+                        .stream()
+                        .map( auth -> auth.getAuthority())
+                        .toList()
+        );
+
+        return Jwts.builder()
+                .setClaims(extraClaims)
+                .setSubject(userDetails.getUsername())
+                .setIssuedAt(now)
+                .setExpiration(exp)
+                .signWith(key, SignatureAlgorithm.HS256)
+                .compact();
+    }
+
+    public boolean validateToken(String token, UserDetails userDetails) {
+        final String username = getUsernameFromToken(token);
+        return (username.equals(userDetails.getUsername()) && !isTokenExpired(token));
+    }
+
+    public String getUsernameFromToken(String token) {
+        return parseClaims(token).getSubject();
+    }
+
+    public Claims parseClaims(String token) {
+        return Jwts.parserBuilder()
+                .setSigningKey(key)
+                .build()
+                .parseClaimsJws(token)
+                .getBody();
+    }
+
+    private boolean isTokenExpired(String token) {
+        return parseClaims(token).getExpiration().before(new Date());
+    }
+}
